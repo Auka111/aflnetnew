@@ -1028,7 +1028,7 @@ void update_state_aware_variables(struct queue_entry *q, u8 dry_run)
           newState_From->seeds = NULL;
           newState_From->seeds_count = 0;
 		  memset(newState_From->branch_coverage_map, 0, sizeof(newState_From->branch_coverage_map));
-		  memset(newState_From->branch_mask, 0, sizeof(newState_From->branch_mask));
+		  memset(newState_From->branch_mark, 0, sizeof(newState_From->branch_mark));
 		  
           k = kh_put(hms, khms_states, prevStateID, &discard);
           kh_value(khms_states, k) = newState_From;
@@ -1060,7 +1060,7 @@ void update_state_aware_variables(struct queue_entry *q, u8 dry_run)
           newState_To->seeds = NULL;
           newState_To->seeds_count = 0;
 		  memset(newState_To->branch_coverage_map, 0, sizeof(newState_To->branch_coverage_map));
-		  memset(newState_To->branch_mask, 0, sizeof(newState_To->branch_mask));
+		  memset(newState_To->branch_mark, 0, sizeof(newState_To->branch_mark));
 
           k = kh_put(hms, khms_states, curStateID, &discard);
           kh_value(khms_states, k) = newState_To;
@@ -1155,7 +1155,7 @@ void update_state_aware_variables(struct queue_entry *q, u8 dry_run)
         newState->seeds[0] = (void *)q;
         newState->seeds_count = 1;
 		memset(newState->branch_coverage_map, 0, sizeof(newState->branch_coverage_map));
-		memset(newState->branch_mask, 0, sizeof(newState->branch_mask));
+		memset(newState->branch_mark, 0, sizeof(newState->branch_mark));
 
         k = kh_put(hms, khms_states, reachable_state_id, &discard);
         kh_value(khms_states, k) = newState;
