@@ -745,7 +745,7 @@ u32 update_scores_and_select_next_state(u8 mode) {
     k = kh_get(hms, khms_states, state_id);
     if (k != kh_end(khms_states)) {
       state = kh_val(khms_states, k);
-	  rare_branch_count = count_rare_branches(state);
+	  int  rare_branch_count = count_rare_branches(state);
       switch(mode) {
         case FAVOR:
           state->score = ceil(1000 * pow(2, -log10(log10(state->fuzzs + 1) * state->selected_times + 1)) * pow(2, log(state->paths_discovered + 1)));
