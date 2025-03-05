@@ -36,6 +36,7 @@
 #define _GNU_SOURCE
 #endif
 #define _FILE_OFFSET_BITS 64
+#define DEBUG1 fileonly
 
 #include "config.h"
 #include "types.h"
@@ -274,16 +275,14 @@ struct queue_entry {
   u32 index;                          /* Index of this queue entry in the whole queue */
   u32 generating_state_id;            /* ID of the start at which the new seed was generated */
   u8 is_initial_seed;                 /* Is this an initial seed */
-  u32 unique_state_count;             /* Unique number of states traversed by this queue entry */
-  
+  u32 unique_state_count;             /* Unique number of states traversed by this queue entry */ 
 
 };
 
 static struct queue_entry *queue,     /* Fuzzing queue (linked list)      */
                           *queue_cur, /* Current offset within the queue  */
                           *queue_top, /* Top of the list                  */
-                          *q_prev100; /* Previous 100 marker              */
-						  
+                          *q_prev100; /* Previous 100 marker              */						  
 
 static struct queue_entry*
   top_rated[MAP_SIZE];                /* Top entries for bitmap bytes     */
@@ -655,6 +654,9 @@ u32 index_search(u32 *A, u32 n, u32 val) {
 }
 
 static int contains_id(int branch_id, int* branch_ids){
+  if (branch_ids == NULL) {
+    return 0;  // 或者返回 -1 或其他错误码，表示发生了错误
+  }
   for (int i = 0; branch_ids[i] != -1; i++){
     if (branch_ids[i] == branch_id) return 1;
 	}
@@ -671,7 +673,7 @@ static int* get_lowest_hit_branch_ids(){
   for (int i = 0; (i < MAP_SIZE) && (ret_list_size < MAX_RARE_BRANCHES - 1); i++){
     // ignore unseen branches. sparse array -> unlikely
     if (unlikely(hit_bits[i] > 0)){	// hit_bits 所有分支的命中次数
-      unsigned int long cur_hits = hit_bits[i];
+      int cur_hits = hit_bits[i];
       int highest_order_bit = 0;
       while(cur_hits >>=1)	// 找大于 最少命中次数 的第一个2的次幂
           highest_order_bit++;
@@ -706,9 +708,13 @@ static int* get_lowest_hit_branch_ids(){
 
 }
 
-int count_rare_branches(state_info_t *state) {
+static int count_rare_branches(state_info_t *state) {
 
-  int * rarest_branches = get_lowest_hit_branch_ids();	// 稀有分支列表  MAX_RARE_BRANCHES = 256
+  int* rarest_branches = get_lowest_hit_branch_ids();	// 稀有分支列表  MAX_RARE_BRANCHES = 256
+  if (rare_branch_ids == NULL) {
+    // 处理内存分配失败的情况
+    return 0;  // 或者其他适当的错误处理
+  }
   int hit_count = 0;
   memset(state->branch_mark, 0, sizeof(state->branch_mark));
   for (int i = 0; i < MAP_SIZE ; i ++){
@@ -744,7 +750,7 @@ u32 update_scores_and_select_next_state(u8 mode) {
     k = kh_get(hms, khms_states, state_id);
     if (k != kh_end(khms_states)) {
       state = kh_val(khms_states, k);
-	  int  rare_branch_count = count_rare_branches(state);
+	  int rare_branch_count = count_rare_branches(state);
       switch(mode) {
         case FAVOR:
           state->score = ceil(1000 * pow(2, -log10(log10(state->fuzzs + 1) * state->selected_times + 1)) * pow(2, log(state->paths_discovered + 1)));
