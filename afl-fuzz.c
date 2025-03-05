@@ -265,7 +265,7 @@ struct queue_entry {
 
   u8* trace_mini;                     /* Trace bytes, if kept             */
   u32 tc_ref;                         /* Trace bytes ref count            */
-
+  u8* fuzzed_branches;                /* @RB@ which branches have been done */
   struct queue_entry *next,           /* Next element, if any             */
                      *next_100;       /* 100 elements ahead               */
 
@@ -276,7 +276,6 @@ struct queue_entry {
   u8 is_initial_seed;                 /* Is this an initial seed */
   u32 unique_state_count;             /* Unique number of states traversed by this queue entry */
   
-  u8* fuzzed_branches;                /* @RB@ which branches have been done */
 
 };
 
@@ -1826,14 +1825,12 @@ static void increment_hit_bits(){
 
 static void add_to_queue(u8* fname, u32 len, u8 passed_det) {
 
-
-  struct queue_entry* q = ck_alloc(sizeof(struct queue_entry));
-
   // @RB@ added these for every queue entry
   q->trace_mini = ck_alloc(MAP_SIZE >> 3);
   minimize_bits(q->trace_mini, trace_bits);
   q->fuzzed_branches = ck_alloc(MAP_SIZE >>3);
   // @End
+  struct queue_entry* q = ck_alloc(sizeof(struct queue_entry));
 
   q->fname        = fname;
   q->len          = len;
