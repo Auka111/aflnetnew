@@ -711,7 +711,7 @@ static int* get_lowest_hit_branch_ids(){
 static int count_rare_branches(state_info_t *state) {
 
   int* rarest_branches = get_lowest_hit_branch_ids();	// 稀有分支列表  MAX_RARE_BRANCHES = 256
-  if (rare_branch_ids == NULL) {
+  if (rarest_branches == NULL) {
     // 处理内存分配失败的情况
     return 0;  // 或者其他适当的错误处理
   }
