@@ -849,8 +849,6 @@ static u32 * is_rb_hit_mini(u8* trace_bits_mini,state_info_t *state){
 
   }
   ck_free(branch_cts);	// 用来排序的，排序后就释放掉
-  ck_free(rarest_branches);
-  ck_free(branch_coverage_map);
   if (min_hit_index == 0){	// 没有命中任何稀有分支
       ck_free(branch_ids);
       branch_ids = NULL;
@@ -1825,12 +1823,13 @@ static void increment_hit_bits(){
 
 static void add_to_queue(u8* fname, u32 len, u8 passed_det) {
 
+  struct queue_entry* q = ck_alloc(sizeof(struct queue_entry));
+  
   // @RB@ added these for every queue entry
   q->trace_mini = ck_alloc(MAP_SIZE >> 3);
   minimize_bits(q->trace_mini, trace_bits);
   q->fuzzed_branches = ck_alloc(MAP_SIZE >>3);
   // @End
-  struct queue_entry* q = ck_alloc(sizeof(struct queue_entry));
 
   q->fname        = fname;
   q->len          = len;
