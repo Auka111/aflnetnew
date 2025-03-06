@@ -6127,10 +6127,10 @@ static u8 fuzz_one(char** argv) {
         fprintf(debug_file, "[DEBUG] Entering rare branch guidance\n");
         u32 *min_branch_hits = is_rb_hit_mini(queue_cur->trace_mini, state);  // 命中的稀有分支列表
         if (min_branch_hits == NULL) {  // 没有命中任何稀有分支，跳过当前种子
-            fprintf(ldebug_file, "[DEBUG] is_rb_hit_mini returned NULL\n");
+            fprintf(debug_file, "[DEBUG] is_rb_hit_mini returned NULL\n");
             return 1;
         } else {
-            fprintf(log_fp, "[DEBUG] is_rb_hit_mini returned non-NULL\n");
+            fprintf(debug_file, "[DEBUG] is_rb_hit_mini returned non-NULL\n");
             int ii = 0;
             int rb_fuzzing = 0;
             int flag = 0;
