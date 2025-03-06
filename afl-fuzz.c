@@ -243,6 +243,8 @@ static s32 cpu_aff = -1;       	      /* Selected CPU core                */
 
 static FILE* plot_file;               /* Gnuplot output file              */
 
+static FILE* debug_file;
+
 struct queue_entry {
 
   u8* fname;                          /* File name for the test case      */
@@ -6076,7 +6078,7 @@ static u8 fuzz_one(char** argv) {
 
   u8  a_collect[MAX_AUTO_EXTRA];
   u32 a_len = 0;
-
+/*
            khint_t k;
            state_info_t *state;
            k = kh_get(hms, khms_states, target_state_id);
@@ -6107,12 +6109,58 @@ static u8 fuzz_one(char** argv) {
                   }
                }
                if(flag==0){
-                 ck_free(min_branch_hits);
                  return 1;
                }
                ck_free(min_branch_hits);
              }
            }
+
+*/
+    u8* tmp;
+    s32 fd;
+    tmp = alloc_printf("%s/debug", out_dir);
+    fd = open(tmp, O_WRONLY | O_CREAT | O_EXCL, 0600);
+    debug_file = fdopen(fd, "w");
+
+    if (!vanilla_afl) {
+        // 稀有分支引导
+        fprintf(debug_file, "[DEBUG] Entering rare branch guidance\n");
+        u32 *min_branch_hits = is_rb_hit_mini(queue_cur->trace_mini, state);  // 命中的稀有分支列表
+        if (min_branch_hits == NULL) {  // 没有命中任何稀有分支，跳过当前种子
+            fprintf(ldebug_file, "[DEBUG] is_rb_hit_mini returned NULL\n");
+            return 1;
+        } else {
+            fprintf(log_fp, "[DEBUG] is_rb_hit_mini returned non-NULL\n");
+            int ii = 0;
+            int rb_fuzzing = 0;
+            int flag = 0;
+            for (ii = 0; min_branch_hits[ii] != 0; ii++) {
+                fprintf(debug_file, "[DEBUG] Processing min_branch_hits[%d] = %u\n", ii, min_branch_hits[ii]);
+                rb_fuzzing = min_branch_hits[ii];
+                if (rb_fuzzing) {
+                    int byte_offset = (rb_fuzzing - 1) >> 3;
+                    int bit_offset = (rb_fuzzing - 1) & 7;
+                    fprintf(debug_file, "[DEBUG] Calculated byte_offset = %d, bit_offset = %d\n", byte_offset, bit_offset);
+                    if (queue_cur->fuzzed_branches[byte_offset] & (1 << (bit_offset))) {
+                        fprintf(debug_file, "[DEBUG] Branch already fuzzed at byte_offset %d, bit_offset %d\n", byte_offset, bit_offset);
+                        continue;
+                    } else {
+                        fprintf(debug_file, "[DEBUG] New branch encountered, marking fuzzed at byte_offset %d, bit_offset %d\n", byte_offset, bit_offset);
+                        queue_cur->fuzzed_branches[byte_offset] |= (1 << (bit_offset));
+                        flag = 1;
+                        break;
+                    }
+                }
+            }
+            if (flag == 0) {
+                fprintf(debug_file, "[DEBUG] No new rare branch found (flag==0)\n");
+                ck_free(min_branch_hits);
+                return 1;
+            }
+            fprintf(debug_file, "[DEBUG] Rare branch marked successfully, freeing min_branch_hits\n");
+            ck_free(min_branch_hits);
+        }
+    }
 
 
 #ifdef IGNORE_FINDS
