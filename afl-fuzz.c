@@ -5265,6 +5265,10 @@ static void show_stats(void) {
   SAYF(bSTG bV bSTOP "  total paths : " cRST "%-5s  " bSTG bV "\n",
        DI(queued_paths));
 
+  SAYF(bV bSTOP "   in_place_resume: %d\n", in_place_resume);
+
+  SAYF(bV bSTOP "   vanilla_afl: %d\n", vanilla_afl);
+
   /* Highlight crashes in red if found, denote going over the KEEP_UNIQUE_CRASH
      limit with a '+' appended to the count. */
 
@@ -9419,7 +9423,6 @@ int main(int argc, char** argv) {
   memset(hit_bits, 0, sizeof(hit_bits));
   
   if (in_place_resume) {
-    vanilla_afl = 0;
     init_hit_bits();
   }
 
