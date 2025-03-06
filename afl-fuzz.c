@@ -130,7 +130,7 @@ EXP_ST u8  skip_deterministic,        /* Skip deterministic stages?       */
            uses_asan,                 /* Target uses ASAN?                */
            no_forkserver,             /* Disable forkserver?              */
            crash_mode,                /* Crash mode! Yeah!                */
-           in_place_resume = 0,           /* Attempt in-place resume?         */
+           in_place_resume,           /* Attempt in-place resume?         */
            auto_changed,              /* Auto-generated tokens changed?   */
            no_cpu_meter_red,          /* Feng shui on the status screen   */
            no_arith,                  /* Skip most arithmetic ops         */
@@ -906,7 +906,7 @@ struct queue_entry *choose_seed(u32 target_state_id, u8 mode)
             //Skip this seed with high probability if it is neither an initial seed nor a seed generated while the
             //current target_state_id was targeted
             if (result->generating_state_id != target_state_id && !result->is_initial_seed && UR(100) < 90) continue;
-            if(vanilla_afl<=0){
+            if(vanilla_afl>0){
             //稀有分支引导
 			  u32 * min_branch_hits = is_rb_hit_mini(result->trace_mini,state);  // 命中的稀有分支列表
               if (min_branch_hits == NULL){  // 没有命中任何稀有分支，跳过当前种子
@@ -5265,9 +5265,9 @@ static void show_stats(void) {
   SAYF(bSTG bV bSTOP "  total paths : " cRST "%-5s  " bSTG bV "\n",
        DI(queued_paths));
 
-  SAYF(bV bSTOP "   in_place_resume: %d\n", in_place_resume);
+  SAYF(bV bSTOP "   in_place_resume: %u\n", in_place_resume);
 
-  SAYF(bV bSTOP "   vanilla_afl: %d\n", vanilla_afl);
+  SAYF(bV bSTOP "   vanilla_afl: %u\n", vanilla_afl);
 
   /* Highlight crashes in red if found, denote going over the KEEP_UNIQUE_CRASH
      limit with a '+' appended to the count. */
@@ -9423,6 +9423,7 @@ int main(int argc, char** argv) {
   memset(hit_bits, 0, sizeof(hit_bits));
   
   if (in_place_resume) {
+    vanilla_afl = 0;
     init_hit_bits();
   }
 
