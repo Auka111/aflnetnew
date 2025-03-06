@@ -841,7 +841,6 @@ static u32* is_rb_hit_mini(u8* trace_bits_mini, state_info_t* state) {
     } else {
         branch_ids[min_hit_index] = 0;  // 添加结束标志
     }
-
     return branch_ids;
 }
 
@@ -899,7 +898,6 @@ struct queue_entry *choose_seed(u32 target_state_id, u8 mode)
                     int byte_offset = (rb_fuzzing - 1) >> 3;
                     int bit_offset = (rb_fuzzing - 1) & 7;
                     if (result->fuzzed_branches[byte_offset] & (1 << (bit_offset))) {
-                      ck_free(min_branch_hits);
                       continue;
                     } else {
                       result->fuzzed_branches[byte_offset] |= (1 << (bit_offset));
