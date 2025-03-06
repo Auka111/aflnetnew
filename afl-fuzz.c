@@ -6076,6 +6076,8 @@ static u8 fuzz_one(char** argv) {
 
   u8  a_collect[MAX_AUTO_EXTRA];
   u32 a_len = 0;
+
+           khint_t k;
            state_info_t *state;
            k = kh_get(hms, khms_states, target_state_id);
            if (k != kh_end(khms_states)) {
