@@ -825,7 +825,7 @@ static u32* is_rb_hit_mini(u8* trace_bits_mini, state_info_t* state) {
 
             // 如果是稀有分支
             if (is_rare) {
-              if (min_hit_index < MAX_RARE_BRANCHES) {
+              if (min_hit_index < MAX_RARE_BRANCHES-1) {
                 branch_ids[min_hit_index] = cur_index + 1;
                 min_hit_index++;
               } else {
