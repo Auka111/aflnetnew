@@ -812,14 +812,7 @@ unsigned int choose_target_state(u8 mode) {
 static u32* is_rb_hit_mini(u8* trace_bits_mini, state_info_t* state) {
     // 获取当前状态下的稀有分支标记
     u64* rarest_branches = state->branch_mark;  // 稀有分支标记表
-    u64* branch_coverage_map = state->branch_coverage_map;  // 稀有分支覆盖表
-    u32* branch_ids = ck_alloc(sizeof(u32) * (MAX_RARE_BRANCHES+1));  // 用于存储命中的稀有分支ID
-    u32* branch_cts = ck_alloc(sizeof(u32) * (MAX_RARE_BRANCHES+1));  // 用于存储命中次数，方便排序
-
-    // 检查内存分配是否成功
-    if (branch_ids == NULL || branch_cts == NULL) {
-        FATAL("Memory allocation failed for branch_ids or branch_cts");
-    }
+    u32* branch_ids = ck_alloc(sizeof(u32) * MAX_RARE_BRANCHES);  // 用于存储命中的稀有分支ID
 
     int min_hit_index = 0;  // 用于存储稀有分支命中列表的索引
 
@@ -832,52 +825,21 @@ static u32* is_rb_hit_mini(u8* trace_bits_mini, state_info_t* state) {
 
             // 如果是稀有分支
             if (is_rare) {
-                // 如果是第一次命中稀有分支，初始化
-                if (min_hit_index == 0) {
-                    branch_cts[min_hit_index] = branch_coverage_map[cur_index];
-                    branch_ids[min_hit_index] = cur_index + 1;  // 默认值为0，+1变成非零值区分其他用例
-                }
-
-                // 排序，越稀有越靠前
-                int j;
-                for (j = 0; j < min_hit_index; j++) {
-                    // 如果当前分支的命中次数较少，插入
-                    if (branch_coverage_map[cur_index] <= branch_cts[j]) {
-                        // 确保 memmove 的操作在有效范围内
-                        if (min_hit_index - j > 0 && min_hit_index - j < MAX_RARE_BRANCHES) {
-                            memmove(branch_cts + j + 1, branch_cts + j, (min_hit_index - j) * sizeof(u32));
-                            memmove(branch_ids + j + 1, branch_ids + j, (min_hit_index - j) * sizeof(u32));
-                        }
-                        branch_cts[j] = branch_coverage_map[cur_index];
-                        branch_ids[j] = cur_index + 1;  // 使用 +1 来区分
-                        break;
-                    }
-                }
-                // 如果当前分支比列表中的所有分支都多，放在最后面
-                if (j == min_hit_index) {
-                    if (min_hit_index < MAX_RARE_BRANCHES) {  // 确保不超出数组大小
-                        branch_cts[j] = branch_coverage_map[cur_index];
-                        branch_ids[j] = cur_index + 1;
-                    }
-                }
-
-                // 增加索引，保证不超出最大限制
-                if (min_hit_index < MAX_RARE_BRANCHES) {
-                    min_hit_index++;
-                }
-            }
+              branch_ids[min_hit_index] = cur_index + 1;  // 默认值为0，+1变成非零值区分其他用例
+              // 增加索引，保证不超出最大限制
+              min_hit_index++;
+              if (min_hit_index == MAX_RARE_BRANCHES - 1) {
+                break;
+              }
+           }
         }
     }
-
-    // 释放排序数组
-    ck_free(branch_cts);
-
     // 如果没有命中任何稀有分支，释放 branch_ids 并设置为 NULL
     if (min_hit_index == 0) {
         ck_free(branch_ids);
         branch_ids = NULL;
     } else {
-            branch_ids[min_hit_index] = 0;  // 添加结束标志
+        branch_ids[min_hit_index] = 0;  // 添加结束标志
     }
 
     return branch_ids;
