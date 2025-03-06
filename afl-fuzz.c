@@ -130,7 +130,7 @@ EXP_ST u8  skip_deterministic,        /* Skip deterministic stages?       */
            uses_asan,                 /* Target uses ASAN?                */
            no_forkserver,             /* Disable forkserver?              */
            crash_mode,                /* Crash mode! Yeah!                */
-           in_place_resume,           /* Attempt in-place resume?         */
+           in_place_resume = 0,           /* Attempt in-place resume?         */
            auto_changed,              /* Auto-generated tokens changed?   */
            no_cpu_meter_red,          /* Feng shui on the status screen   */
            no_arith,                  /* Skip most arithmetic ops         */
@@ -9418,7 +9418,7 @@ int main(int argc, char** argv) {
   
   memset(hit_bits, 0, sizeof(hit_bits));
   
-    if (in_place_resume) {
+  if (in_place_resume) {
     vanilla_afl = 0;
     init_hit_bits();
   }
