@@ -894,38 +894,6 @@ struct queue_entry *choose_seed(u32 target_state_id, u8 mode)
             //Skip this seed with high probability if it is neither an initial seed nor a seed generated while the
             //current target_state_id was targeted
             if (result->generating_state_id != target_state_id && !result->is_initial_seed && UR(100) < 90) continue;
-            if(!vanilla_afl){
-              //稀有分支引导
-              u32 * min_branch_hits = is_rb_hit_mini(result->trace_mini,state);  // 命中的稀有分支列表
-              if (min_branch_hits == NULL){  // 没有命中任何稀有分支，跳过当前种子
-                continue;
-              } else {
-                int ii = 0;
-                int rb_fuzzing = 0;
-                int flag=0;
-                for (ii = 0; min_branch_hits[ii] != 0; ii++) {
-                  rb_fuzzing = min_branch_hits[ii];
-                  if (rb_fuzzing) {
-                    int byte_offset = (rb_fuzzing - 1) >> 3;
-                    int bit_offset = (rb_fuzzing - 1) & 7;
-                    if (result->fuzzed_branches[byte_offset] & (1 << (bit_offset))) {
-                      continue;
-                    } else {
-                      result->fuzzed_branches[byte_offset] |= (1 << (bit_offset));
-                      flag=1;
-                      break;
-                    }
-                  }
-               }
-               if(flag==0){
-                 ck_free(min_branch_hits);
-                 min_branch_hits = NULL;
-                 continue;
-               }
-               ck_free(min_branch_hits);
-               min_branch_hits = NULL;
-             }
-           }
 
             u32 target_state_index = get_state_index(target_state_id);
             if (pending_favored) {
@@ -6108,6 +6076,42 @@ static u8 fuzz_one(char** argv) {
 
   u8  a_collect[MAX_AUTO_EXTRA];
   u32 a_len = 0;
+           state_info_t *state;
+           k = kh_get(hms, khms_states, target_state_id);
+           if (k != kh_end(khms_states)) {
+              state = kh_val(khms_states, k);
+           }
+           if(!vanilla_afl){
+              //稀有分支引导
+              u32 * min_branch_hits = is_rb_hit_mini(queue_cur->trace_mini,state);  // 命中的稀有分支列表
+              if (min_branch_hits == NULL){  // 没有命中任何稀有分支，跳过当前种子
+                return 1;
+              } else {
+                int ii = 0;
+                int rb_fuzzing = 0;
+                int flag=0;
+                for (ii = 0; min_branch_hits[ii] != 0; ii++) {
+                  rb_fuzzing = min_branch_hits[ii];
+                  if (rb_fuzzing) {
+                    int byte_offset = (rb_fuzzing - 1) >> 3;
+                    int bit_offset = (rb_fuzzing - 1) & 7;
+                    if (queue_cur->fuzzed_branches[byte_offset] & (1 << (bit_offset))) {
+                      continue;
+                    } else {
+                      queue_cur->fuzzed_branches[byte_offset] |= (1 << (bit_offset));
+                      flag=1;
+                      break;
+                    }
+                  }
+               }
+               if(flag==0){
+                 ck_free(min_branch_hits);
+                 return 1;
+               }
+               ck_free(min_branch_hits);
+             }
+           }
+
 
 #ifdef IGNORE_FINDS
 
