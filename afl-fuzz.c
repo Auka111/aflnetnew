@@ -6117,10 +6117,16 @@ static u8 fuzz_one(char** argv) {
 
 */
     u8* tmp;
-    s32 fd;
     tmp = alloc_printf("%s/debug", out_dir);
     fd = open(tmp, O_WRONLY | O_CREAT | O_EXCL, 0600);
     debug_file = fdopen(fd, "w");
+
+    khint_t k;
+    state_info_t *state;
+    k = kh_get(hms, khms_states, target_state_id);
+    if (k != kh_end(khms_states)) {
+      state = kh_val(khms_states, k);
+    }
 
     if (!vanilla_afl) {
         // 稀有分支引导
