@@ -814,6 +814,11 @@ static u32* is_rb_hit_mini(u8* trace_bits_mini, state_info_t* state) {
     u64* rarest_branches = state->branch_mark;  // 稀有分支标记表
     u32* branch_ids = ck_alloc(sizeof(u32) * MAX_RARE_BRANCHES);  // 用于存储命中的稀有分支ID
 
+    // 检查内存分配是否成功
+    if (branch_ids == NULL) {
+        FATAL("Memory allocation failed for branch_ids");
+    }
+
     int min_hit_index = 0;  // 用于存储稀有分支命中列表的索引
 
     // 遍历每个分支
@@ -825,24 +830,30 @@ static u32* is_rb_hit_mini(u8* trace_bits_mini, state_info_t* state) {
 
             // 如果是稀有分支
             if (is_rare) {
-              if (min_hit_index < MAX_RARE_BRANCHES-1) {
-                branch_ids[min_hit_index] = cur_index + 1;
-                min_hit_index++;
-              } else {
-                break;  // 超出最大索引，退出循环
-              }
-           }
+                if (min_hit_index < MAX_RARE_BRANCHES-1) {  // 确保不超出最大索引
+                    branch_ids[min_hit_index] = cur_index + 1;  // 默认值为0，+1变成非零值区分其他用例
+                    min_hit_index++;
+                } else {
+                    break;  // 超出最大索引，退出循环
+                }
+            }
         }
     }
+
     // 如果没有命中任何稀有分支，释放 branch_ids 并设置为 NULL
     if (min_hit_index == 0) {
         ck_free(branch_ids);
-        branch_ids = NULL;
+        return NULL;  // 没有命中任何稀有分支时，返回 NULL
     } else {
-        branch_ids[min_hit_index] = 0;  // 添加结束标志
+        // 添加结束标志
+        if (min_hit_index < MAX_RARE_BRANCHES) {
+            branch_ids[min_hit_index] = 0;  // 添加结束标志，确保不越界
+        }
     }
+
     return branch_ids;
 }
+
 
 
 /* Select a seed to exercise the target state */
@@ -908,9 +919,11 @@ struct queue_entry *choose_seed(u32 target_state_id, u8 mode)
                }
                if(flag==0){
                  ck_free(min_branch_hits);
+                 min_branch_hits = NULL;
                  continue;
                }
                ck_free(min_branch_hits);
+               min_branch_hits = NULL;
              }
            }
 
