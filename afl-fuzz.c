@@ -303,7 +303,7 @@ static u8* (*post_handler)(u8* buf, u32* len);
 
 static u64 hit_bits[MAP_SIZE];   
 
-static u32 vanilla_afl = 1;
+static u32 vanilla_afl = 500;
 static u32 MAX_RARE_BRANCHES = 256;//ϡ\D3з\D6֧\B5\C4\D7\EE\B4\F3\CA\FD\C1\BF\A3\AC\C9\E8\D6\C3Ϊ256
 static int rare_branch_exp = 4;
 
@@ -907,7 +907,7 @@ struct queue_entry *choose_seed(u32 target_state_id, u8 mode)
             //Skip this seed with high probability if it is neither an initial seed nor a seed generated while the
             //current target_state_id was targeted
             if (result->generating_state_id != target_state_id && !result->is_initial_seed && UR(100) < 90) continue;
-            if(!vanilla_afl){
+/*            if(!vanilla_afl){
             //稀有分支引导
 			u32 * min_branch_hits = is_rb_hit_mini(result->trace_mini,state);  // 命中的稀有分支列表
             if (min_branch_hits == NULL){  // 没有命中任何稀有分支，跳过当前种子
@@ -933,6 +933,7 @@ struct queue_entry *choose_seed(u32 target_state_id, u8 mode)
 			  if(flag==0 || min_branch_hits[ii] == 0) continue;
 			}
 			}
+*/
             u32 target_state_index = get_state_index(target_state_id);
             if (pending_favored) {
               /* If we have any favored, non-fuzzed new arrivals in the queue,
