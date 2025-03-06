@@ -825,11 +825,11 @@ static u32* is_rb_hit_mini(u8* trace_bits_mini, state_info_t* state) {
 
             // 如果是稀有分支
             if (is_rare) {
-              branch_ids[min_hit_index] = cur_index + 1;  // 默认值为0，+1变成非零值区分其他用例
-              // 增加索引，保证不超出最大限制
-              min_hit_index++;
-              if (min_hit_index == MAX_RARE_BRANCHES - 1) {
-                break;
+              if (min_hit_index < MAX_RARE_BRANCHES) {
+                branch_ids[min_hit_index] = cur_index + 1;
+                min_hit_index++;
+              } else {
+                break;  // 超出最大索引，退出循环
               }
            }
         }
@@ -885,31 +885,36 @@ struct queue_entry *choose_seed(u32 target_state_id, u8 mode)
             //current target_state_id was targeted
             if (result->generating_state_id != target_state_id && !result->is_initial_seed && UR(100) < 90) continue;
             if(!vanilla_afl){
-            //稀有分支引导
-			  u32 * min_branch_hits = is_rb_hit_mini(result->trace_mini,state);  // 命中的稀有分支列表
+              //稀有分支引导
+              u32 * min_branch_hits = is_rb_hit_mini(result->trace_mini,state);  // 命中的稀有分支列表
               if (min_branch_hits == NULL){  // 没有命中任何稀有分支，跳过当前种子
-			    continue;
+                continue;
               } else {
-			    int ii = 0;
+                int ii = 0;
                 int rb_fuzzing = 0;
-			    int flag=0;
+                int flag=0;
                 for (ii = 0; min_branch_hits[ii] != 0; ii++) {
                   rb_fuzzing = min_branch_hits[ii];
                   if (rb_fuzzing) {
                     int byte_offset = (rb_fuzzing - 1) >> 3;
                     int bit_offset = (rb_fuzzing - 1) & 7;
                     if (result->fuzzed_branches[byte_offset] & (1 << (bit_offset))) {
+                      ck_free(min_branch_hits);
                       continue;
                     } else {
                       result->fuzzed_branches[byte_offset] |= (1 << (bit_offset));
-					  flag=1;
-					  break;
+                      flag=1;
+                      break;
                     }
-				  }
-			    }
-			    if(flag==0) continue;
-			  }
-			}
+                  }
+               }
+               if(flag==0){
+                 ck_free(min_branch_hits);
+                 continue;
+               }
+               ck_free(min_branch_hits);
+             }
+           }
 
             u32 target_state_index = get_state_index(target_state_id);
             if (pending_favored) {
