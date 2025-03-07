@@ -6131,27 +6131,34 @@ static u8 fuzz_one(char** argv) {
     if (!vanilla_afl) {
         // 稀有分支引导
         fprintf(debug_file, "[DEBUG] Entering rare branch guidance\n");
+        fflush(debug_file);
         u32 *min_branch_hits = is_rb_hit_mini(queue_cur->trace_mini, state);  // 命中的稀有分支列表
         if (min_branch_hits == NULL) {  // 没有命中任何稀有分支，跳过当前种子
             fprintf(debug_file, "[DEBUG] is_rb_hit_mini returned NULL\n");
+            fflush(debug_file);
             return 1;
         } else {
             fprintf(debug_file, "[DEBUG] is_rb_hit_mini returned non-NULL\n");
+            fflush(debug_file);
             int ii = 0;
             int rb_fuzzing = 0;
             int flag = 0;
             for (ii = 0; min_branch_hits[ii] != 0; ii++) {
                 fprintf(debug_file, "[DEBUG] Processing min_branch_hits[%d] = %u\n", ii, min_branch_hits[ii]);
+                fflush(debug_file);
                 rb_fuzzing = min_branch_hits[ii];
                 if (rb_fuzzing) {
                     int byte_offset = (rb_fuzzing - 1) >> 3;
                     int bit_offset = (rb_fuzzing - 1) & 7;
                     fprintf(debug_file, "[DEBUG] Calculated byte_offset = %d, bit_offset = %d\n", byte_offset, bit_offset);
+                    fflush(debug_file);
                     if (queue_cur->fuzzed_branches[byte_offset] & (1 << (bit_offset))) {
                         fprintf(debug_file, "[DEBUG] Branch already fuzzed at byte_offset %d, bit_offset %d\n", byte_offset, bit_offset);
+                        fflush(debug_file);
                         continue;
                     } else {
                         fprintf(debug_file, "[DEBUG] New branch encountered, marking fuzzed at byte_offset %d, bit_offset %d\n", byte_offset, bit_offset);
+                        fflush(debug_file);
                         queue_cur->fuzzed_branches[byte_offset] |= (1 << (bit_offset));
                         flag = 1;
                         break;
@@ -6160,13 +6167,16 @@ static u8 fuzz_one(char** argv) {
             }
             if (flag == 0) {
                 fprintf(debug_file, "[DEBUG] No new rare branch found (flag==0)\n");
+                fflush(debug_file);
                 ck_free(min_branch_hits);
                 return 1;
             }
             fprintf(debug_file, "[DEBUG] Rare branch marked successfully, freeing min_branch_hits\n");
+            fflush(debug_file);
             ck_free(min_branch_hits);
         }
     }
+    fclose(debug_file);
 
 
 #ifdef IGNORE_FINDS
