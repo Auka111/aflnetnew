@@ -810,13 +810,16 @@ unsigned int choose_target_state(u8 mode) {
 }
 
 static u32* is_rb_hit_mini(u8* trace_bits_mini, state_info_t* state) {
-    fprintf(plot_file, "[DEBUG] Enter is_rb_hit_mini\n");
+    fprintf(plot_file, "[DEBUG] 813\n");
     fflush(plot_file);
 
     // 获取当前状态下的稀有分支标记
     u64* rarest_branches = state->branch_mark;  // 稀有分支标记表
+    fprintf(plot_file, "[DEBUG] 817\n");
+    fflush(plot_file);
     u32* branch_ids = ck_alloc(sizeof(u32) * MAX_RARE_BRANCHES);  // 用于存储命中的稀有分支ID
-
+    fprintf(plot_file, "[DEBUG] 820\n");
+    fflush(plot_file);
     // 检查内存分配是否成功
     if (branch_ids == NULL) {
         fprintf(plot_file, "Memory allocation failed for branch_ids\n");
@@ -824,26 +827,33 @@ static u32* is_rb_hit_mini(u8* trace_bits_mini, state_info_t* state) {
     }
 
     int min_hit_index = 0;  // 用于存储稀有分支命中列表的索引
-
+    fprintf(plot_file, "[DEBUG] 829\n");
+    fflush(plot_file);
     // 遍历每个分支
     for (int i = 0; i < MAP_SIZE; i++) {
         // 检查是否命中
+        fprintf(plot_file, "[DEBUG] 833\n");
+        fflush(plot_file);
         if (trace_bits_mini[i >> 3] & (1 << (i & 7))) {  // 如果命中
+            fprintf(plot_file, "[DEBUG] 837\n");
+            fflush(plot_file);
             int cur_index = i;
             int is_rare = rarest_branches[cur_index];
-            fprintf(plot_file, "[DEBUG] is rare : %d\n", is_rare);
+            fprintf(plot_file, "[DEBUG] 841\n", is_rare);
             fflush(plot_file);
             // 如果是稀有分支
             if (is_rare) {
-                fprintf(plot_file, "[DEBUG] Branch %d is rare\n", cur_index);
+                fprintf(plot_file, "[DEBUG] 845\n", cur_index);
                 fflush(plot_file);
                 if (min_hit_index < MAX_RARE_BRANCHES-1) {  // 确保不超出最大索引
-                    fprintf(plot_file, "[DEBUG] Saved branch id %d at index %d\n", cur_index + 1, min_hit_index);
+                    fprintf(plot_file, "[DEBUG] 848\n", cur_index + 1, min_hit_index);
                     fflush(plot_file);
                     branch_ids[min_hit_index] = cur_index + 1;  // 默认值为0，+1变成非零值区分其他用例
+                    fprintf(plot_file, "[DEBUG] 851\n", cur_index + 1, min_hit_index);
+                    fflush(plot_file);
                     min_hit_index++;
                 } else {
-                    fprintf(plot_file, "[DEBUG] Reached maximum rare branches limit, breaking\n");
+                    fprintf(plot_file, "855\n");
                     fflush(plot_file);
                     break;  // 超出最大索引，退出循环
                 }
@@ -854,7 +864,7 @@ static u32* is_rb_hit_mini(u8* trace_bits_mini, state_info_t* state) {
     // 如果没有命中任何稀有分支，释放 branch_ids 并设置为 NULL
     if (min_hit_index == 0) {
         ck_free(branch_ids);
-        fprintf(plot_file, "[DEBUG] No rare branch hit, returning NULL\n");
+        fprintf(plot_file, "866\n");
         fflush(plot_file);
         return NULL;  // 没有命中任何稀有分支时，返回 NULL
     } else {
@@ -862,10 +872,11 @@ static u32* is_rb_hit_mini(u8* trace_bits_mini, state_info_t* state) {
         if (min_hit_index < MAX_RARE_BRANCHES) {
             branch_ids[min_hit_index] = 0;  // 添加结束标志，确保不越界
         }
-        fprintf(plot_file, "[DEBUG] Found %d rare branches, returning branch_ids\n", min_hit_index);
+        fprintf(plot_file, "874\n", min_hit_index);
         fflush(plot_file);
     }
-
+    fprintf(plot_file, "877\n", min_hit_index);
+    fflush(plot_file);
     return branch_ids;
 }
 
