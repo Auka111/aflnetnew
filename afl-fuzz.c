@@ -834,6 +834,10 @@ static u32* is_rb_hit_mini(u8* trace_bits_mini, state_info_t* state) {
         // 检查是否命中
         fprintf(plot_file, "[DEBUG] 833\n");
         fflush(plot_file);
+        if( trace_bits_mini == NULL ) fprintf(plot_file, "NULL\n");
+        fprintf(plot_file, "[DEBUG] trace_bits_mini = %p, expected size = %d bytes\n", trace_bits_mini, MAP_SIZE >> 3);
+        fflush(plot_file);
+
         if (trace_bits_mini[i >> 3] & (1 << (i & 7))) {  // 如果命中
             fprintf(plot_file, "[DEBUG] 837\n");
             fflush(plot_file);
@@ -2341,8 +2345,8 @@ static void update_bitmap_score(struct queue_entry* q) {
             previous winner, discard its trace_bits[] if necessary. */
 
          if (!--top_rated[i]->tc_ref) {
-           ck_free(top_rated[i]->trace_mini);
-           top_rated[i]->trace_mini = 0;
+           //ck_free(top_rated[i]->trace_mini);
+           //top_rated[i]->trace_mini = 0;
          }
 
        }
