@@ -809,6 +809,68 @@ unsigned int choose_target_state(u8 mode) {
   return result;
 }
 
+
+static u32 * is_rb_hit_mini(u8* trace_bits_mini,state_info_t *state){
+  fprintf(plot_file, "[DEBUG] 814\n");
+    // 获取当前状态下的稀有分支标记
+  u64* rarest_branches = state->branch_mark;  // 稀有分支标记表
+  u64* branch_coverage_map = state->branch_coverage_map;  // 稀有分支标记表
+  u32* branch_ids = ck_alloc(sizeof(u32) * MAX_RARE_BRANCHES);  // 用于存储命中的稀有分支ID
+  u32* branch_cts = ck_alloc(sizeof(u32) * MAX_RARE_BRANCHES);  // 用于存储命中次数，方便排序
+  int min_hit_index = 0;  // 用于存储稀有分支命中列表的索引
+  for (int i = 0; i < MAP_SIZE ; i ++){
+      if (unlikely (trace_bits_mini[i >> 3]  & (1 <<(i & 7)) )){	// 如果命中
+        fprintf(plot_file, "[DEBUG] 823\n");
+        int cur_index = i;
+        int is_rare = rarest_branches[cur_index];
+        if (is_rare) {	// 如果是稀有分支
+          // at loop initialization, set min_branch_hit properly
+          if (!min_hit_index) {
+            branch_cts[min_hit_index] = branch_coverage_map[cur_index];
+            branch_ids[min_hit_index] = cur_index + 1;
+          }
+          // in general just check if we're a smaller branch
+          // than the previously found min
+          int j;
+          for (j = 0 ; j < min_hit_index; j++){	// 对命中的稀有分支列表排序，越稀有越靠前
+            if (branch_coverage_map[cur_index] <= branch_cts[j]){
+              memmove(branch_cts + j + 1, branch_cts + j, min_hit_index -j);
+              memmove(branch_ids + j + 1, branch_ids + j, min_hit_index -j);
+              branch_cts[j] = branch_coverage_map[cur_index];
+              branch_ids[j] = cur_index + 1;	// 默认值为0，+1变成非零值区别其他用例
+            }
+          }
+          // append at end
+          if (j == min_hit_index){	// 比列表中所有的都多，就放在最后面
+            branch_cts[j] = branch_coverage_map[cur_index];
+            // + 1 so we can distinguish 0 from other cases
+            branch_ids[j] = cur_index + 1;
+
+          }
+          // this is only incremented when is_rare holds, which should
+          // only happen a max of MAX_RARE_BRANCHES -1 times -- the last
+          // time we will never reenter so this is always < MAX_RARE_BRANCHES
+          // at the top of the if statement
+          min_hit_index++;
+        }
+      }
+
+  }
+  ck_free(branch_cts);	// 用来排序的，排序后就释放掉
+  if (min_hit_index == 0){	// 没有命中任何稀有分支
+      ck_free(branch_ids);
+      branch_ids = NULL;
+  } else {
+    // 0 terminate the array
+    branch_ids[min_hit_index] = 0;	// 添加结束标志
+  }
+  return branch_ids;
+
+}
+
+
+
+/*
 static u32* is_rb_hit_mini(u8* trace_bits_mini, state_info_t* state) {
     fprintf(plot_file, "[DEBUG] 813\n");
     fflush(plot_file);
@@ -884,7 +946,7 @@ static u32* is_rb_hit_mini(u8* trace_bits_mini, state_info_t* state) {
     return branch_ids;
 }
 
-
+*/
 
 /* Select a seed to exercise the target state */
 struct queue_entry *choose_seed(u32 target_state_id, u8 mode)
@@ -924,6 +986,41 @@ struct queue_entry *choose_seed(u32 target_state_id, u8 mode)
             //Skip this seed with high probability if it is neither an initial seed nor a seed generated while the
             //current target_state_id was targeted
             if (result->generating_state_id != target_state_id && !result->is_initial_seed && UR(100) < 90) continue;
+
+            if(!vanilla_afl){
+            //稀有分支引导
+			  u32 * min_branch_hits = is_rb_hit_mini(result->trace_mini,state);  // 命中的稀有分支列表
+			  fprintf(plot_file, "[DEBUG] 990\n");
+              if (min_branch_hits == NULL){  // 没有命中任何稀有分支，跳过当前种子
+                fprintf(plot_file, "[DEBUG] 991\n");
+			    continue;
+              } else {
+                fprintf(plot_file, "[DEBUG] 995\n");
+			    int ii = 0;
+                int rb_fuzzing = 0;
+			    int flag=0;
+                for (ii = 0; min_branch_hits[ii] != 0; ii++) {
+                  rb_fuzzing = min_branch_hits[ii];
+                  if (rb_fuzzing) {
+                    int byte_offset = (rb_fuzzing - 1) >> 3;
+                    int bit_offset = (rb_fuzzing - 1) & 7;
+                    if (result->fuzzed_branches[byte_offset] & (1 << (bit_offset))) {
+                      continue;
+                    } else {
+                      result->fuzzed_branches[byte_offset] |= (1 << (bit_offset));
+					  flag=1;
+					  break;
+                    }
+				  }
+			    }
+			    if(flag==0) {
+			      ck_free(min_branch_hits);
+			      continue;
+			    }
+			    ck_free(min_branch_hits);
+			  }
+			}
+
 
             u32 target_state_index = get_state_index(target_state_id);
             if (pending_favored) {
@@ -6143,7 +6240,7 @@ static u8 fuzz_one(char** argv) {
              }
            }
 
-*/
+
     khint_t k;
     state_info_t *state;
     k = kh_get(hms, khms_states, target_state_id);
@@ -6199,6 +6296,8 @@ static u8 fuzz_one(char** argv) {
             ck_free(min_branch_hits);
         }
     }
+
+*/
 
 
 #ifdef IGNORE_FINDS
