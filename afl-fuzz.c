@@ -811,7 +811,6 @@ unsigned int choose_target_state(u8 mode) {
 
 
 static u32 * is_rb_hit_mini(u8* trace_bits_mini,state_info_t *state){
-  fprintf(plot_file, "[DEBUG] 814\n");
     // 获取当前状态下的稀有分支标记
   u64* rarest_branches = state->branch_mark;  // 稀有分支标记表
   u64* branch_coverage_map = state->branch_coverage_map;  // 稀有分支标记表
@@ -820,7 +819,6 @@ static u32 * is_rb_hit_mini(u8* trace_bits_mini,state_info_t *state){
   int min_hit_index = 0;  // 用于存储稀有分支命中列表的索引
   for (int i = 0; i < MAP_SIZE ; i ++){
       if (unlikely (trace_bits_mini[i >> 3]  & (1 <<(i & 7)) )){	// 如果命中
-        fprintf(plot_file, "[DEBUG] 823\n");
         int cur_index = i;
         int is_rare = rarest_branches[cur_index];
         if (is_rare) {	// 如果是稀有分支
@@ -870,84 +868,6 @@ static u32 * is_rb_hit_mini(u8* trace_bits_mini,state_info_t *state){
 
 
 
-/*
-static u32* is_rb_hit_mini(u8* trace_bits_mini, state_info_t* state) {
-    fprintf(plot_file, "[DEBUG] 813\n");
-    fflush(plot_file);
-
-    // 获取当前状态下的稀有分支标记
-    u64* rarest_branches = state->branch_mark;  // 稀有分支标记表
-    fprintf(plot_file, "[DEBUG] 817\n");
-    fflush(plot_file);
-    u32* branch_ids = ck_alloc(sizeof(u32) * MAX_RARE_BRANCHES);  // 用于存储命中的稀有分支ID
-    fprintf(plot_file, "[DEBUG] 820\n");
-    fflush(plot_file);
-    // 检查内存分配是否成功
-    if (branch_ids == NULL) {
-        fprintf(plot_file, "Memory allocation failed for branch_ids\n");
-        fflush(plot_file);
-    }
-
-    int min_hit_index = 0;  // 用于存储稀有分支命中列表的索引
-    fprintf(plot_file, "[DEBUG] 829\n");
-    fflush(plot_file);
-    // 遍历每个分支
-    for (int i = 0; i < MAP_SIZE; i++) {
-        // 检查是否命中
-        fprintf(plot_file, "[DEBUG] 833\n");
-        fflush(plot_file);
-        if( trace_bits_mini == NULL ) fprintf(plot_file, "NULL\n");
-        fprintf(plot_file, "[DEBUG] trace_bits_mini = %p, expected size = %d bytes\n", trace_bits_mini, MAP_SIZE >> 3);
-        fflush(plot_file);
-
-        if (trace_bits_mini[i >> 3] & (1 << (i & 7))) {  // 如果命中
-            fprintf(plot_file, "[DEBUG] 837\n");
-            fflush(plot_file);
-            int cur_index = i;
-            int is_rare = rarest_branches[cur_index];
-            fprintf(plot_file, "[DEBUG] 841\n", is_rare);
-            fflush(plot_file);
-            // 如果是稀有分支
-            if (is_rare) {
-                fprintf(plot_file, "[DEBUG] 845\n", cur_index);
-                fflush(plot_file);
-                if (min_hit_index < MAX_RARE_BRANCHES-1) {  // 确保不超出最大索引
-                    fprintf(plot_file, "[DEBUG] 848\n", cur_index + 1, min_hit_index);
-                    fflush(plot_file);
-                    branch_ids[min_hit_index] = cur_index + 1;  // 默认值为0，+1变成非零值区分其他用例
-                    fprintf(plot_file, "[DEBUG] 851\n", cur_index + 1, min_hit_index);
-                    fflush(plot_file);
-                    min_hit_index++;
-                } else {
-                    fprintf(plot_file, "855\n");
-                    fflush(plot_file);
-                    break;  // 超出最大索引，退出循环
-                }
-            }
-        }
-    }
-
-    // 如果没有命中任何稀有分支，释放 branch_ids 并设置为 NULL
-    if (min_hit_index == 0) {
-        ck_free(branch_ids);
-        fprintf(plot_file, "866\n");
-        fflush(plot_file);
-        return NULL;  // 没有命中任何稀有分支时，返回 NULL
-    } else {
-        // 添加结束标志
-        if (min_hit_index < MAX_RARE_BRANCHES) {
-            branch_ids[min_hit_index] = 0;  // 添加结束标志，确保不越界
-        }
-        fprintf(plot_file, "874\n", min_hit_index);
-        fflush(plot_file);
-    }
-    fprintf(plot_file, "877\n", min_hit_index);
-    fflush(plot_file);
-    return branch_ids;
-}
-
-*/
-
 /* Select a seed to exercise the target state */
 struct queue_entry *choose_seed(u32 target_state_id, u8 mode)
 {
@@ -990,12 +910,9 @@ struct queue_entry *choose_seed(u32 target_state_id, u8 mode)
             if(!vanilla_afl){
             //稀有分支引导
 			  u32 * min_branch_hits = is_rb_hit_mini(result->trace_mini,state);  // 命中的稀有分支列表
-			  fprintf(plot_file, "[DEBUG] 990\n");
               if (min_branch_hits == NULL){  // 没有命中任何稀有分支，跳过当前种子
-                fprintf(plot_file, "[DEBUG] 991\n");
 			    continue;
               } else {
-                fprintf(plot_file, "[DEBUG] 995\n");
 			    int ii = 0;
                 int rb_fuzzing = 0;
 			    int flag=0;
@@ -6203,101 +6120,6 @@ static u8 fuzz_one(char** argv) {
 
   u8  a_collect[MAX_AUTO_EXTRA];
   u32 a_len = 0;
-/*
-           khint_t k;
-           state_info_t *state;
-           k = kh_get(hms, khms_states, target_state_id);
-           if (k != kh_end(khms_states)) {
-              state = kh_val(khms_states, k);
-           }
-           if(!vanilla_afl){
-              //稀有分支引导
-              u32 * min_branch_hits = is_rb_hit_mini(queue_cur->trace_mini,state);  // 命中的稀有分支列表
-              if (min_branch_hits == NULL){  // 没有命中任何稀有分支，跳过当前种子
-                return 1;
-              } else {
-                int ii = 0;
-                int rb_fuzzing = 0;
-                int flag=0;
-                for (ii = 0; min_branch_hits[ii] != 0; ii++) {
-                  rb_fuzzing = min_branch_hits[ii];
-                  if (rb_fuzzing) {
-                    int byte_offset = (rb_fuzzing - 1) >> 3;
-                    int bit_offset = (rb_fuzzing - 1) & 7;
-                    if (queue_cur->fuzzed_branches[byte_offset] & (1 << (bit_offset))) {
-                      continue;
-                    } else {
-                      queue_cur->fuzzed_branches[byte_offset] |= (1 << (bit_offset));
-                      flag=1;
-                      break;
-                    }
-                  }
-               }
-               if(flag==0){
-                 return 1;
-               }
-               ck_free(min_branch_hits);
-             }
-           }
-
-
-    khint_t k;
-    state_info_t *state;
-    k = kh_get(hms, khms_states, target_state_id);
-    if (k != kh_end(khms_states)) {
-      state = kh_val(khms_states, k);
-    }
-
-    if (!vanilla_afl) {
-        // 稀有分支引导
-        fprintf(plot_file, "[DEBUG] Entering rare branch guidance\n");
-        fflush(plot_file);
-        u32 *min_branch_hits = is_rb_hit_mini(queue_cur->trace_mini, state);  // 命中的稀有分支列表
-        if (min_branch_hits == NULL) {  // 没有命中任何稀有分支，跳过当前种子
-            fprintf(plot_file, "[DEBUG] is_rb_hit_mini returned NULL\n");
-            fflush(plot_file);
-            return 1;
-        } else {
-            fprintf(plot_file, "[DEBUG] is_rb_hit_mini returned non-NULL\n");
-            fflush(plot_file);
-            int ii = 0;
-            int rb_fuzzing = 0;
-            int flag = 0;
-            for (ii = 0; min_branch_hits[ii] != 0; ii++) {
-                fprintf(plot_file, "[DEBUG] Processing min_branch_hits[%d] = %u\n", ii, min_branch_hits[ii]);
-                fflush(plot_file);
-                rb_fuzzing = min_branch_hits[ii];
-                if (rb_fuzzing) {
-                    int byte_offset = (rb_fuzzing - 1) >> 3;
-                    int bit_offset = (rb_fuzzing - 1) & 7;
-                    fprintf(plot_file, "[DEBUG] Calculated byte_offset = %d, bit_offset = %d\n", byte_offset, bit_offset);
-                    fflush(plot_file);
-                    if (queue_cur->fuzzed_branches[byte_offset] & (1 << (bit_offset))) {
-                        fprintf(plot_file, "[DEBUG] Branch already fuzzed at byte_offset %d, bit_offset %d\n", byte_offset, bit_offset);
-                        fflush(plot_file);
-                        continue;
-                    } else {
-                        fprintf(plot_file, "[DEBUG] New branch encountered, marking fuzzed at byte_offset %d, bit_offset %d\n", byte_offset, bit_offset);
-                        fflush(plot_file);
-                        queue_cur->fuzzed_branches[byte_offset] |= (1 << (bit_offset));
-                        flag = 1;
-                        break;
-                    }
-                }
-            }
-            if (flag == 0) {
-                fprintf(plot_file, "[DEBUG] No new rare branch found (flag==0)\n");
-                fflush(plot_file);
-                ck_free(min_branch_hits);
-                return 1;
-            }
-            fprintf(plot_file, "[DEBUG] Rare branch marked successfully, freeing min_branch_hits\n");
-            fflush(plot_file);
-            ck_free(min_branch_hits);
-        }
-    }
-
-*/
 
 
 #ifdef IGNORE_FINDS
