@@ -5271,10 +5271,6 @@ static void show_stats(void) {
   SAYF(bSTG bV bSTOP "  total paths : " cRST "%-5s  " bSTG bV "\n",
        DI(queued_paths));
 
-  SAYF(bV bSTOP "   in_place_resume: %u\n", in_place_resume);
-
-  SAYF(bV bSTOP "   vanilla_afl: %u\n", vanilla_afl);
-
   /* Highlight crashes in red if found, denote going over the KEEP_UNIQUE_CRASH
      limit with a '+' appended to the count. */
 
@@ -9497,7 +9493,7 @@ int main(int argc, char** argv) {
         cull_queue();
 
         /* Update number of times a state has been selected for targeted fuzzing */
-        khint_t k = kh_get(hms, khms_states, target_state_id);
+        khint_t k = kh_get(hmeds, khms_states, target_state_id);
         if (k != kh_end(khms_states)) {
           kh_val(khms_states, k)->selected_times++;
         }
