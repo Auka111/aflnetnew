@@ -36,7 +36,6 @@
 #define _GNU_SOURCE
 #endif
 #define _FILE_OFFSET_BITS 64
-#define DEBUG1 fileonly
 
 #include "config.h"
 #include "types.h"
@@ -57,9 +56,6 @@
 #include <termios.h>
 #include <dlfcn.h>
 #include <sched.h>
-#include <stdbool.h>
-#include <stdarg.h>
-#include <limits.h>
 
 #include <sys/wait.h>
 #include <sys/time.h>
@@ -70,6 +66,7 @@
 #include <sys/mman.h>
 #include <sys/ioctl.h>
 #include <sys/file.h>
+#include <sys/capability.h>
 
 #include "aflnet.h"
 #include <graphviz/gvc.h>
@@ -202,7 +199,9 @@ EXP_ST u64 total_crashes,             /* Total number of crashes          */
            bytes_trim_in,             /* Bytes coming into the trimmer    */
            bytes_trim_out,            /* Bytes coming outa the trimmer    */
            blocks_eff_total,          /* Blocks subject to effector maps  */
-           blocks_eff_select;         /* Blocks selected as fuzzable      */
+           blocks_eff_select,         /* Blocks selected as fuzzable      */
+           state_paths_total,         /*yyc 状态的路径总数                  */
+           state_paths_discover_total;/*yyc 状态发现的路径总数               */
 
 static u32 subseq_tmouts;             /* Number of timeouts in a row      */
 
@@ -258,7 +257,8 @@ struct queue_entry {
       fs_redundant;                   /* Marked as redundant in the fs?   */
 
   u32 bitmap_size,                    /* Number of bits set in bitmap     */
-      exec_cksum;                     /* Checksum of the execution trace  */
+      exec_cksum,                     /* Checksum of the execution trace  */
+      fuzz_level;                     /*yyc the times the seed was choosed*/
 
   u64 exec_us,                        /* Execution time (us)              */
       handicap,                       /* Number of queue cycles behind    */
@@ -266,7 +266,7 @@ struct queue_entry {
 
   u8* trace_mini;                     /* Trace bytes, if kept             */
   u32 tc_ref;                         /* Trace bytes ref count            */
-  u8* fuzzed_branches;                /* @RB@ which branches have been done */
+
   struct queue_entry *next,           /* Next element, if any             */
                      *next_100;       /* 100 elements ahead               */
 
@@ -275,14 +275,17 @@ struct queue_entry {
   u32 index;                          /* Index of this queue entry in the whole queue */
   u32 generating_state_id;            /* ID of the start at which the new seed was generated */
   u8 is_initial_seed;                 /* Is this an initial seed */
-  u32 unique_state_count;             /* Unique number of states traversed by this queue entry */ 
+  u32 unique_state_count;             /* Unique number of states traversed by this queue entry */
+
+  int single_crash;
+  int has_new_state;                  /* yyc seed has found new state */
 
 };
 
 static struct queue_entry *queue,     /* Fuzzing queue (linked list)      */
                           *queue_cur, /* Current offset within the queue  */
                           *queue_top, /* Top of the list                  */
-                          *q_prev100; /* Previous 100 marker              */						  
+                          *q_prev100; /* Previous 100 marker              */
 
 static struct queue_entry*
   top_rated[MAP_SIZE];                /* Top entries for bitmap bytes     */
@@ -300,12 +303,6 @@ static struct extra_data* a_extras;   /* Automatically selected extras    */
 static u32 a_extras_cnt;              /* Total number of tokens available */
 
 static u8* (*post_handler)(u8* buf, u32* len);
-
-static u64 hit_bits[MAP_SIZE];   
-
-static u32 vanilla_afl = 1000;
-static u32 MAX_RARE_BRANCHES = 256;//ϡ\D3з\D6֧\B5\C4\D7\EE\B4\F3\CA\FD\C1\BF\A3\AC\C9\E8\D6\C3Ϊ256
-static int rare_branch_exp = 4;
 
 /* Interesting values, as per config.h */
 
@@ -476,23 +473,6 @@ void expand_was_fuzzed_map(u32 new_states, u32 new_qentries) {
   fuzzed_map_qentries += new_qentries;
 }
 
-//初始化hit_bits数组
-// when resuming re-increment hit bits
-static void init_hit_bits() {
-  s32 branch_hit_fd = -1;
-
-  ACTF("Attempting to init hit bits...");
-  u8* fn = alloc_printf("%s/branch-hits.bin", out_dir);
-
-  branch_hit_fd = open(fn, O_RDONLY);
-  if (branch_hit_fd < 0) PFATAL("Unable to open '%s'", fn);
-
-  ck_read(branch_hit_fd, hit_bits, sizeof(u64) * MAP_SIZE, fn);
-
-  close(branch_hit_fd);
-  OKF("Init'ed hit_bits.");
-}
-
 /* Get unique state count, given a state sequence */
 u32 get_unique_state_count(unsigned int *state_sequence, unsigned int state_count) {
   //A hash set is used so that no state is counted twice
@@ -515,32 +495,6 @@ u32 get_unique_state_count(unsigned int *state_sequence, unsigned int state_coun
 
   kh_destroy(hs32, khs_state_ids);
   return result;
-}
-
-void update_branch_coverage(state_info_t *state) {
-  if (!state || !trace_bits) return;
-
-  for (int i = 0; i < MAP_SIZE; i++) {
-    if (trace_bits[i] > 0 && state->branch_coverage_map[i] < ULONG_MAX) {
-	    state->branch_coverage_map[i]++;
-    }
-  }
-}
-
-void update_state_branch_coverage(unsigned int *state_sequence, int state_count) {
-  if (!state_sequence || !trace_bits) return;
-
-  khint_t k;
-  for (int i = 0; i < state_count; i++) {
-    unsigned int state_id = state_sequence[i];
-
-    k = kh_get(hms, khms_states, state_id);
-    if (k != kh_end(khms_states)) {
-      state_info_t *state = kh_val(khms_states, k);
-
-      update_branch_coverage(state);
-    }
-  }
 }
 
 /* Check if a state sequence is interesting (e.g., new state is discovered). Loop is taken into account */
@@ -653,85 +607,6 @@ u32 index_search(u32 *A, u32 n, u32 val) {
   return index;
 }
 
-static int contains_id(int branch_id, int* branch_ids){
-  if (branch_ids == NULL) {
-    return 0;  // 或者返回 -1 或其他错误码，表示发生了错误
-  }
-  for (int i = 0; branch_ids[i] != -1; i++){
-    if (branch_ids[i] == branch_id) return 1;
-	}
-  return 0;
-}
-
-
-//求动态阈值，同时得到稀有分支列表
-static int* get_lowest_hit_branch_ids(){
-  int * rare_branch_ids = ck_alloc(sizeof(int) * MAX_RARE_BRANCHES);	// MAX_RARE_BRANCHES = 256
-  int lowest_hob = INT_MAX;
-  int ret_list_size = 0;
-
-  for (int i = 0; (i < MAP_SIZE) && (ret_list_size < MAX_RARE_BRANCHES - 1); i++){
-    // ignore unseen branches. sparse array -> unlikely
-    if (unlikely(hit_bits[i] > 0)){	// hit_bits 所有分支的命中次数
-      int cur_hits = hit_bits[i];
-      int highest_order_bit = 0;
-      while(cur_hits >>=1)	// 找大于 最少命中次数 的第一个2的次幂
-          highest_order_bit++;
-      lowest_hob = highest_order_bit < lowest_hob ? highest_order_bit : lowest_hob;
-      if (highest_order_bit < rare_branch_exp){		// rare_branch_exp 该变量是界定稀有分支的阈值
-        // if we are an order of magnitude smaller, prioritize the
-        // rarer branches
-        // 如果求得的highest_order_bit比阈值rare_branch_exp还要第一个量级（也是减1的原因），更新阈值
-        if (highest_order_bit < rare_branch_exp - 1){
-          rare_branch_exp = highest_order_bit + 1;
-          // everything else that came before had way more hits
-          // than this one, so remove from list
-          ret_list_size = 0;	// 清空原有列表
-        }
-        rare_branch_ids[ret_list_size] = i;	// 保存稀有分支
-        ret_list_size++;
-      }
-
-    }
-  }
-
-  if (ret_list_size == 0){
-    if (lowest_hob != INT_MAX) {	// 如果列表为空但是lowest_hob的值变化了，阈值调大一个量级再执行一次
-      rare_branch_exp = lowest_hob + 1;
-      ck_free(rare_branch_ids);
-      return get_lowest_hit_branch_ids();
-    }
-  }
-
-  rare_branch_ids[ret_list_size] = -1;	// 添加结束标志
-  return rare_branch_ids;	// 返回稀有分支列表
-
-}
-
-static int count_rare_branches(state_info_t *state) {
-
-  int* rarest_branches = get_lowest_hit_branch_ids();	// 稀有分支列表  MAX_RARE_BRANCHES = 256
-  if (rarest_branches == NULL) {
-    // 处理内存分配失败的情况
-    return 0;  // 或者其他适当的错误处理
-  }
-  int hit_count = 0;
-  memset(state->branch_mark, 0, sizeof(state->branch_mark));
-  if (state->branch_coverage_map == NULL) return 0;
-  for (int i = 0; i < MAP_SIZE ; i ++){
-      if (state->branch_coverage_map[i] > 0){	// 如果命中
-        int cur_index = i;
-        int is_rare = contains_id(cur_index, rarest_branches);	// 是否是稀有分支
-        if (is_rare) {	// 如果是稀有分支
-          hit_count++;
-		  state->branch_mark[i]=1;
-        }
-      }
-  }
-  ck_free(rarest_branches);
-  return hit_count;
-}
-
 /* Calculate state scores and select the next state */
 u32 update_scores_and_select_next_state(u8 mode) {
   u32 result = 0, i;
@@ -747,10 +622,10 @@ u32 update_scores_and_select_next_state(u8 mode) {
   //Update the states' score
   for(i = 0; i < state_ids_count; i++) {
     u32 state_id = state_ids[i];
+
     k = kh_get(hms, khms_states, state_id);
     if (k != kh_end(khms_states)) {
       state = kh_val(khms_states, k);
-	  int rare_branch_count = count_rare_branches(state);
       switch(mode) {
         case FAVOR:
           state->score = ceil(1000 * pow(2, -log10(log10(state->fuzzs + 1) * state->selected_times + 1)) * pow(2, log(state->paths_discovered + 1)));
@@ -809,71 +684,35 @@ unsigned int choose_target_state(u8 mode) {
   return result;
 }
 
-
-static u32 * is_rb_hit_mini(u8* trace_bits_mini,state_info_t *state){
-    // 获取当前状态下的稀有分支标记
-  u64* rarest_branches = state->branch_mark;  // 稀有分支标记表
-  u64* branch_coverage_map = state->branch_coverage_map;  // 稀有分支标记表
-  u32* branch_ids = ck_alloc(sizeof(u32) * MAX_RARE_BRANCHES);  // 用于存储命中的稀有分支ID
-  u32* branch_cts = ck_alloc(sizeof(u32) * MAX_RARE_BRANCHES);  // 用于存储命中次数，方便排序
-  int min_hit_index = 0;  // 用于存储稀有分支命中列表的索引
-  for (int i = 0; i < MAP_SIZE ; i ++){
-      if (unlikely (trace_bits_mini[i >> 3]  & (1 <<(i & 7)) )){	// 如果命中
-        int cur_index = i;
-        int is_rare = rarest_branches[cur_index];
-        if (is_rare) {	// 如果是稀有分支
-          // at loop initialization, set min_branch_hit properly
-          if (!min_hit_index) {
-            branch_cts[min_hit_index] = branch_coverage_map[cur_index];
-            branch_ids[min_hit_index] = cur_index + 1;
-          }
-          // in general just check if we're a smaller branch
-          // than the previously found min
-          int j;
-          for (j = 0 ; j < min_hit_index; j++){	// 对命中的稀有分支列表排序，越稀有越靠前
-            if (branch_coverage_map[cur_index] <= branch_cts[j]){
-              memmove(branch_cts + j + 1, branch_cts + j, min_hit_index -j);
-              memmove(branch_ids + j + 1, branch_ids + j, min_hit_index -j);
-              branch_cts[j] = branch_coverage_map[cur_index];
-              branch_ids[j] = cur_index + 1;	// 默认值为0，+1变成非零值区别其他用例
-            }
-          }
-          // append at end
-          if (j == min_hit_index){	// 比列表中所有的都多，就放在最后面
-            branch_cts[j] = branch_coverage_map[cur_index];
-            // + 1 so we can distinguish 0 from other cases
-            branch_ids[j] = cur_index + 1;
-
-          }
-          // this is only incremented when is_rare holds, which should
-          // only happen a max of MAX_RARE_BRANCHES -1 times -- the last
-          // time we will never reenter so this is always < MAX_RARE_BRANCHES
-          // at the top of the if statement
-          min_hit_index++;
-        }
-      }
-
-  }
-  ck_free(branch_cts);	// 用来排序的，排序后就释放掉
-  if (min_hit_index == 0){	// 没有命中任何稀有分支
-      ck_free(branch_ids);
-      branch_ids = NULL;
-  } else {
-    // 0 terminate the array
-    branch_ids[min_hit_index] = 0;	// 添加结束标志
-  }
-  return branch_ids;
-
-}
-
-
-
 /* Select a seed to exercise the target state */
 struct queue_entry *choose_seed(u32 target_state_id, u8 mode)
 {
   khint_t k;
   state_info_t *state;
   struct queue_entry *result = NULL;
+  struct queue_entry *seed_temp = NULL;
+  //temp值，计算每个种子的分数
+  double score;
+  //最大的score分数
+  double max_score=0;
+  //最大score分数对应的种子index
+  u32 max_score_seed_index;
+  //种子len的最大最小值
+  u32 len_min = 10000000;
+  u32 len_max = 0;
+  //种子bitmap_size的最大最小值
+  u32 bitmap_size_min = 10000000;
+  u32 bitmap_size_max = 0;
+  //种子exec_us最大最小值
+  u64 exec_us_min=10000000;
+  u64 exec_us_max=0;
+  //种子depth最大最小值
+  u64 depth_min=10000000;
+  u64 depth_max=0;
+  
+
+
+
 
   k = kh_get(hms, khms_states, target_state_id);
   if (k != kh_end(khms_states)) {
@@ -893,8 +732,6 @@ struct queue_entry *choose_seed(u32 target_state_id, u8 mode)
         break;
       case FAVOR:
         if (state->seeds_count > 10) {
-          //Do seed selection similar to AFL + take into account state-aware information
-          //e.g., was_fuzzed information becomes state-aware
           u32 passed_cycles = 0;
           while (passed_cycles < 5) {
             result = state->seeds[state->selected_seed_index];
@@ -907,38 +744,6 @@ struct queue_entry *choose_seed(u32 target_state_id, u8 mode)
             //current target_state_id was targeted
             if (result->generating_state_id != target_state_id && !result->is_initial_seed && UR(100) < 90) continue;
 
-            if(!vanilla_afl){
-            //稀有分支引导
-			  u32 * min_branch_hits = is_rb_hit_mini(result->trace_mini,state);  // 命中的稀有分支列表
-              if (min_branch_hits == NULL){  // 没有命中任何稀有分支，跳过当前种子
-			    continue;
-              } else {
-			    int ii = 0;
-                int rb_fuzzing = 0;
-			    int flag=0;
-                for (ii = 0; min_branch_hits[ii] != 0; ii++) {
-                  rb_fuzzing = min_branch_hits[ii];
-                  if (rb_fuzzing) {
-                    int byte_offset = (rb_fuzzing - 1) >> 3;
-                    int bit_offset = (rb_fuzzing - 1) & 7;
-                    if (result->fuzzed_branches[byte_offset] & (1 << (bit_offset))) {
-                      continue;
-                    } else {
-                      result->fuzzed_branches[byte_offset] |= (1 << (bit_offset));
-					  flag=1;
-					  break;
-                    }
-				  }
-			    }
-			    if(flag==0) {
-			      ck_free(min_branch_hits);
-			      continue;
-			    }
-			    ck_free(min_branch_hits);
-			  }
-			}
-
-
             u32 target_state_index = get_state_index(target_state_id);
             if (pending_favored) {
               /* If we have any favored, non-fuzzed new arrivals in the queue,
@@ -949,16 +754,59 @@ struct queue_entry *choose_seed(u32 target_state_id, u8 mode)
               /* Otherwise, this seed is selected */
               break;
             } else if (!result->favored && queued_paths > 10) {
-              /* Otherwise, still possibly skip non-favored cases, albeit less often.
-                 The odds of skipping stuff are higher for already-fuzzed inputs and
-                 lower for never-fuzzed entries. */
-              if (queue_cycle > 1 && (was_fuzzed_map[target_state_index][result->index] == 0)) {
-                if (UR(100) < SKIP_NFAV_NEW_PROB) continue;
-              } else {
-                if (UR(100) < SKIP_NFAV_OLD_PROB) continue;
-              }
-
-              /* Otherwise, this seed is selected */
+                //----------------------------------------------------------------------------------------------------------------------------------------------
+                //先计算一遍所有种子的评分
+                //记录每个指标的最大最小值，用于在评分公式中归一化
+                for(int i=0; i<=state->seeds_count; i++){
+                  seed_temp = state->seeds[state->selected_seed_index];
+                  if(seed_temp->len < len_min){
+                    len_min = seed_temp->len;
+                  }
+                  if(seed_temp->len > len_max){
+                    len_max = seed_temp->len;
+                  }
+                  if(seed_temp->bitmap_size < bitmap_size_min){
+                    bitmap_size_min = seed_temp->bitmap_size;
+                  }
+                  if(seed_temp->bitmap_size > bitmap_size_max){
+                    bitmap_size_max = seed_temp->bitmap_size;
+                  }
+                  if(seed_temp->exec_us < exec_us_min){
+                    exec_us_min = seed_temp->exec_us;
+                  }
+                  if(seed_temp->exec_us > exec_us_max){
+                    exec_us_max = seed_temp->exec_us;
+                  }
+                  if(seed_temp->depth < depth_min){
+                    depth_min = seed_temp->depth;
+                  }
+                  if(seed_temp->depth > depth_max){
+                    depth_max = seed_temp->depth;
+                  }
+                  if (state->selected_seed_index + 1 == state->seeds_count) {
+                  state->selected_seed_index = 0;
+                } else state->selected_seed_index++;
+                }
+                for(int i=0; i<=state->seeds_count; i++){
+                seed_temp = state->seeds[state->selected_seed_index];
+                score = 0.31*seed_temp->single_crash 
+                      + 0.16*seed_temp->has_new_cov 
+                      - 0.15*(seed_temp->len-len_min)/(len_max-len_min) 
+                      + 0.1*(seed_temp->bitmap_size-bitmap_size_min)/(bitmap_size_max-bitmap_size_min) 
+                      - 0.18*(seed_temp->exec_us-exec_us_min)/(exec_us_max-exec_us_min) 
+                      + 0.09*(seed_temp->depth-depth_min)/(depth_max-depth_min);
+               if(score > max_score){
+                  max_score = score;
+                  max_score_seed_index = state->selected_seed_index;
+                  result = state->seeds[state->selected_seed_index];
+                }
+                
+                if (state->selected_seed_index + 1 == state->seeds_count) {
+                  state->selected_seed_index = 0;
+                } else state->selected_seed_index++;
+            }
+          //----------------------------------------------------------------------------------------------------------------------------------------------
+          
               break;
             }
           }
@@ -978,7 +826,6 @@ struct queue_entry *choose_seed(u32 target_state_id, u8 mode)
 
   return result;
 }
-
 /* Update state-aware variables */
 void update_state_aware_variables(struct queue_entry *q, u8 dry_run)
 {
@@ -992,9 +839,6 @@ void update_state_aware_variables(struct queue_entry *q, u8 dry_run)
   unsigned int *state_sequence = (*extract_response_codes)(response_buf, response_buf_size, &state_count);
 
   q->unique_state_count = get_unique_state_count(state_sequence, state_count);
-
-  //位置可能需要修改？
-  update_state_branch_coverage(state_sequence, state_count);
 
   if (is_state_sequence_interesting(state_sequence, state_count)) {
     //Save the current kl_messages to a file which can be used to replay the newly discovered paths on the ipsm
@@ -1037,9 +881,9 @@ void update_state_aware_variables(struct queue_entry *q, u8 dry_run)
           newState_From->selected_seed_index = 0;
           newState_From->seeds = NULL;
           newState_From->seeds_count = 0;
-		  memset(newState_From->branch_coverage_map, 0, sizeof(newState_From->branch_coverage_map));
-		  memset(newState_From->branch_mark, 0, sizeof(newState_From->branch_mark));
-		  
+
+          q->has_new_state = 1;/*yyc add*/
+
           k = kh_put(hms, khms_states, prevStateID, &discard);
           kh_value(khms_states, k) = newState_From;
 
@@ -1069,8 +913,9 @@ void update_state_aware_variables(struct queue_entry *q, u8 dry_run)
           newState_To->selected_seed_index = 0;
           newState_To->seeds = NULL;
           newState_To->seeds_count = 0;
-		  memset(newState_To->branch_coverage_map, 0, sizeof(newState_To->branch_coverage_map));
-		  memset(newState_To->branch_mark, 0, sizeof(newState_To->branch_mark));
+
+
+          q->has_new_state = 1;/*yyc add*/
 
           k = kh_put(hms, khms_states, curStateID, &discard);
           kh_value(khms_states, k) = newState_To;
@@ -1089,6 +934,7 @@ void update_state_aware_variables(struct queue_entry *q, u8 dry_run)
 			    edge = agedge(ipsm, from, to, "new_edge", TRUE);
           if (dry_run) agset(edge, "color", "blue");
           else agset(edge, "color", "red");
+          q->has_new_state = 1;/*yyc add*/
 		    }
 
         //Update prevStateID
@@ -1164,8 +1010,6 @@ void update_state_aware_variables(struct queue_entry *q, u8 dry_run)
         newState->seeds = (void **) ck_realloc (newState->seeds, sizeof(void *));
         newState->seeds[0] = (void *)q;
         newState->seeds_count = 1;
-		memset(newState->branch_coverage_map, 0, sizeof(newState->branch_coverage_map));
-		memset(newState->branch_mark, 0, sizeof(newState->branch_mark));
 
         k = kh_put(hms, khms_states, reachable_state_id, &discard);
         kh_value(khms_states, k) = newState;
@@ -1197,6 +1041,7 @@ void update_state_aware_variables(struct queue_entry *q, u8 dry_run)
       k = kh_get(hms, khms_states, state_id);
       if (k != kh_end(khms_states)) {
         kh_val(khms_states, k)->paths++;
+        state_paths_total++;
       }
     }
   }
@@ -1207,6 +1052,7 @@ void update_state_aware_variables(struct queue_entry *q, u8 dry_run)
     k = kh_get(hms, khms_states, target_state_id);
     if (k != kh_end(khms_states)) {
       kh_val(khms_states, k)->paths_discovered++;
+      state_paths_discover_total++;
     }
   }
 
@@ -1354,7 +1200,6 @@ HANDLE_RESPONSES:
   return 0;
 }
 /* End of AFLNet-specific variables & functions */
-
 
 /* Get unix time in milliseconds */
 
@@ -1805,44 +1650,11 @@ static void mark_as_redundant(struct queue_entry* q, u8 state) {
 }
 
 
-/* Compact trace bytes into a smaller bitmap. We effectively just drop the
-   count information here. This is called only sporadically, for some
-   new paths. */
-
-static void minimize_bits(u8* dst, u8* src) {
-
-  u32 i = 0;
-
-  while (i < MAP_SIZE) {
-
-    if (*(src++)) dst[i >> 3] |= 1 << (i & 7);
-    i++;
-
-  }
-
-}
-
-// 在函数在save_if_interesting中被调用，也就是每个用例执行完后，就会更新给hit_bits。但是初始种子的命中信息并未被计入？？？
-/* increment hit bits by 1 for every element of trace_bits that has been hit.
- effectively counts that one input has hit each element of trace_bits */
-static void increment_hit_bits(){
-  for (int i = 0; i < MAP_SIZE; i++){
-    if ((trace_bits[i] > 0) && (hit_bits[i] < ULONG_MAX))
-      hit_bits[i]++;
-  }
-}
-
 /* Append new test case to the queue. */
 
 static void add_to_queue(u8* fname, u32 len, u8 passed_det) {
 
   struct queue_entry* q = ck_alloc(sizeof(struct queue_entry));
-  
-  // @RB@ added these for every queue entry
-  q->trace_mini = ck_alloc(MAP_SIZE >> 3);
-  minimize_bits(q->trace_mini, trace_bits);
-  q->fuzzed_branches = ck_alloc(MAP_SIZE >>3);
-  // @End
 
   q->fname        = fname;
   q->len          = len;
@@ -1854,6 +1666,9 @@ static void add_to_queue(u8* fname, u32 len, u8 passed_det) {
   q->generating_state_id = target_state_id;
   q->is_initial_seed = 0;
   q->unique_state_count = 0;
+  q->fuzz_level = 0;//yyc fuzz_level初始化
+  q->single_crash = 0;
+  q->has_new_state = 0;
 
   if (q->depth > max_depth) max_depth = q->depth;
 
@@ -1935,7 +1750,6 @@ EXP_ST void destroy_queue(void) {
       if (q->regions[i].state_sequence) ck_free(q->regions[i].state_sequence);
     }
     if (q->regions) ck_free(q->regions);
-	ck_free(q->fuzzed_branches);
     ck_free(q);
     q = n;
 
@@ -2322,6 +2136,24 @@ static void remove_shm(void) {
 }
 
 
+/* Compact trace bytes into a smaller bitmap. We effectively just drop the
+   count information here. This is called only sporadically, for some
+   new paths. */
+
+static void minimize_bits(u8* dst, u8* src) {
+
+  u32 i = 0;
+
+  while (i < MAP_SIZE) {
+
+    if (*(src++)) dst[i >> 3] |= 1 << (i & 7);
+    i++;
+
+  }
+
+}
+
+
 /* When we bump into a new path, we call this to see if the path appears
    more "favorable" than any of the existing ones. The purpose of the
    "favorables" is to have a minimal set of paths that trigger all the bits
@@ -2359,8 +2191,8 @@ static void update_bitmap_score(struct queue_entry* q) {
             previous winner, discard its trace_bits[] if necessary. */
 
          if (!--top_rated[i]->tc_ref) {
-           //ck_free(top_rated[i]->trace_mini);
-           //top_rated[i]->trace_mini = 0;
+           ck_free(top_rated[i]->trace_mini);
+           top_rated[i]->trace_mini = 0;
          }
 
        }
@@ -3622,26 +3454,7 @@ static u8 run_target(char** argv, u32 timeout) {
 
 static void write_to_testcase(void* mem, u32 len) {
 
-  s32 fd = out_fd;
-
-  if (out_file) {
-
-    unlink(out_file); /* Ignore errors. */
-
-    fd = open(out_file, O_WRONLY | O_CREAT | O_EXCL, 0600);
-
-    if (fd < 0) PFATAL("Unable to create '%s'", out_file);
-
-  } else lseek(fd, 0, SEEK_SET);
-
-  ck_write(fd, mem, len, out_file);
-
-  if (!out_file) {
-
-    if (ftruncate(fd, len)) PFATAL("ftruncate() failed");
-    lseek(fd, 0, SEEK_SET);
-
-  } else close(fd);
+  //AFLNet sends data via network so it does not need this function
 
 }
 
@@ -3849,21 +3662,13 @@ static void perform_dry_run(char** argv) {
     kl_messages = construct_kl_messages(q->fname, q->regions, q->region_count);
 
     res = calibrate_case(argv, q, use_mem, 0, 1);
-    //\D4\DApreform_dry_run\D6\D0ִ\D0й\FDcalibrate_case\BA\F3\D4ٴμ\C6\CB\E3\B5õ\BDtrace_mini
-    // @RB@ added these for every queue entry
-    // free what was added in add_to_queue
-    ck_free(q->trace_mini);
-	ck_free(q->fuzzed_branches);
-    q->trace_mini = ck_alloc(MAP_SIZE >> 3);
-    minimize_bits(q->trace_mini, trace_bits);
-	q->fuzzed_branches = ck_alloc(MAP_SIZE >>3);
-    // @End
     ck_free(use_mem);
 
     /* Update state-aware variables (e.g., state machine, regions and their annotations */
     if (state_aware_mode) update_state_aware_variables(q, 1);
 
     /* save the seed to file for replaying */
+    
     u8 *fn_replay = alloc_printf("%s/replayable-queue/%s", out_dir, basename(q->fname));
     save_kl_messages_to_file(kl_messages, fn_replay, 1, messages_sent);
     ck_free(fn_replay);
@@ -3932,6 +3737,7 @@ static void perform_dry_run(char** argv) {
 
         if (skip_crashes) {
           WARNF("Test case results in a crash (skipping)");
+          q->single_crash = 1;
           q->cal_failed = CAL_CHANCES;
           cal_failures++;
           break;
@@ -4273,7 +4079,7 @@ static u8 save_if_interesting(char** argv, void* mem, u32 len, u8 fault) {
 
     /* Keep only if there are new bits in the map, add to queue for
        future fuzzing, etc. */
-    increment_hit_bits();	
+
     if (!(hnb = has_new_bits(virgin_bits))) {
       if (crash_mode) total_crashes++;
       return 0;
@@ -5766,7 +5572,6 @@ EXP_ST u8 common_fuzz_stuff(char** argv, u8* out_buf, u32 len) {
   //Update fuzz count, no matter whether the generated test is interesting or not
   if (state_aware_mode) update_fuzzs();
 
-  if (vanilla_afl) --vanilla_afl;
   if (stop_soon) return 1;
 
   if (fault == FAULT_TMOUT) {
@@ -5905,7 +5710,7 @@ static u32 calculate_score(struct queue_entry* q) {
     default:        perf_score *= 5;
 
   }
-
+  //以上是afl默认的能量分配策略
   /* Make sure that we don't go over limit. */
 
   if (perf_score > HAVOC_MAX_MULT * 100) perf_score = HAVOC_MAX_MULT * 100;
@@ -6116,7 +5921,6 @@ static u8 fuzz_one(char** argv) {
 
   u8  a_collect[MAX_AUTO_EXTRA];
   u32 a_len = 0;
-
 
 #ifdef IGNORE_FINDS
 
@@ -7905,6 +7709,8 @@ abandon_entry:
   //munmap(orig_in, queue_cur->len);
   ck_free(orig_in);
 
+  queue_cur->fuzz_level++;
+
   if (in_buf != orig_in) ck_free(in_buf);
   ck_free(out_buf);
   ck_free(eff_map);
@@ -9045,6 +8851,51 @@ static void save_cmdline(u32 argc, char** argv) {
 
 }
 
+/* Check that afl-fuzz (file/process) has some effective and permitted capability */
+
+static int check_ep_capability(cap_value_t cap, const char *filename) {
+  cap_t file_cap, proc_cap;
+  cap_flag_value_t cap_flag_value;
+  int no_capability = 1;
+  int pid = getpid();
+
+  file_cap = cap_get_file(filename);
+  proc_cap = cap_get_proc();
+
+  if (!file_cap && !proc_cap)
+    return no_capability;
+
+  if (file_cap) {
+    if (cap_get_flag(file_cap, cap, CAP_EFFECTIVE, &cap_flag_value))
+      PFATAL("Could not get CAP_EFFECTIVE flag value from file \"%s\"", filename);
+
+    if (cap_flag_value != CAP_SET)
+      return no_capability;
+
+    if (cap_get_flag(file_cap, cap, CAP_PERMITTED, &cap_flag_value))
+      PFATAL("Could not get CAP_PERMITTED flag value from file \"%s\"", filename);
+
+    if (cap_flag_value != CAP_SET)
+      return no_capability;
+  }
+
+  if (proc_cap) {
+    if (cap_get_flag(proc_cap, cap, CAP_EFFECTIVE, &cap_flag_value))
+      PFATAL("Could not get CAP_EFFECTIVE flag value from process id %d", pid);
+
+    if (cap_flag_value != CAP_SET)
+      return no_capability;
+
+    if (cap_get_flag(proc_cap, cap, CAP_PERMITTED, &cap_flag_value))
+      PFATAL("Could not get CAP_PERMITTED flag value from process id %d", pid);
+
+    if (cap_flag_value != CAP_SET)
+      return no_capability;
+  }
+
+  return 0;
+}
+
 #ifndef AFL_LIB
 
 /* Main entry point */
@@ -9304,6 +9155,9 @@ int main(int argc, char** argv) {
         } else if (!strcmp(optarg, "HTTP")) {
           extract_requests = &extract_requests_http;
           extract_response_codes = &extract_response_codes_http;
+        } else if (!strcmp(optarg, "IPP")) {
+          extract_requests = &extract_requests_ipp;
+          extract_response_codes = &extract_response_codes_ipp;
         } else {
           FATAL("%s protocol is not supported yet!", optarg);
         }
@@ -9367,6 +9221,14 @@ int main(int argc, char** argv) {
   if (!use_net) FATAL("Please specify network information of the server under test (e.g., tcp://127.0.0.1/8554)");
 
   if (!protocol_selected) FATAL("Please specify the protocol to be tested using the -P option");
+
+  if (netns_name) {
+    if (check_ep_capability(CAP_SYS_ADMIN, argv[0]) != 0)
+      FATAL("Could not run the server under test in a \"%s\" network namespace "
+            "without CAP_SYS_ADMIN capability.\n You can set it by invoking "
+            "afl-fuzz with sudo or by \"$ setcap cap_sys_admin+ep /path/to/afl-fuzz\".", netns_name);
+  }
+
   setup_signal_handlers();
   check_asan_opts();
 
@@ -9422,13 +9284,6 @@ int main(int argc, char** argv) {
   setup_post();
   setup_shm();
   init_count_class16();
-  
-  memset(hit_bits, 0, sizeof(hit_bits));
-  
-  if (in_place_resume) {
-    vanilla_afl = 0;
-    init_hit_bits();
-  }
 
   setup_ipsm();
 
